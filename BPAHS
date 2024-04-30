@@ -1,0 +1,277 @@
+import random
+import time
+import joblib
+import numpy as np
+
+def time_heuristic(func, *args):
+    start_time = time.time()
+    result = func(*args)
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    return elapsed_time, result
+
+
+def generate_items_ds1(capacities, numbers_of_items, weight_ranges):
+    ds1 = []
+    for capacity in capacities:
+        for num_items in numbers_of_items:
+            for weight_range in weight_ranges:
+                for _ in range(5):
+                    items = [random.randint(*weight_range) for _ in range(num_items)]
+                    ds1.append((capacity, items))
+    return ds1
+
+
+def generate_items_ds2(capacity, numbers_of_items, fractions):
+    ds2 = []
+    deltas = [20, 50, 90] 
+    for num_items in numbers_of_items:
+        for fraction in fractions:
+            base_weight = capacity // fraction
+            for delta in deltas:
+                for i in range(5): 
+                    delta_multiplier = delta / 100.0
+                    low = int(base_weight * (1 - delta_multiplier))
+                    high = int(base_weight * (1 + delta_multiplier))
+                    items = [random.randint(low, high) for _ in range(num_items)]
+                    ds2.append((capacity, items))
+    return ds2
+
+
+
+def generate_items_ds3(capacity, num_items, weight_range):
+    ds3 = []
+    for _ in range(5):
+        items = [random.randint(*weight_range) for _ in range(num_items)]
+        ds3.append((capacity, items))
+    return ds3
+
+
+def generate_items_dst(capacities, numbers_of_items, weight_ranges):
+    dst = []
+    for capacity in capacities:
+        for num_items in numbers_of_items:
+            for weight_range in weight_ranges:
+                for _ in range(5):
+                    items = [random.randint(*weight_range) for _ in range(num_items)]
+                    dst.append((capacity, items))
+    return dst
+
+
+
+
+
+def FFD(items, bin_capacity):
+    sorted_items = sorted(items, reverse=True)
+    bins = []
+
+    for item in sorted_items:
+        placed = False
+        for bin in bins:
+            if sum(bin) + item <= bin_capacity:
+                bin.append(item)
+                placed = True
+                break
+        if not placed:
+            bins.append([item])
+    return bins
+
+
+
+def DJD(items, bin_capacity):
+
+    bins = []
+    current_bin = []
+
+    def is_third_full(current_bin, bin_capacity):
+        return sum(current_bin) >= bin_capacity / 3
+
+    def find_best_combo(remaining_items, space_left):
+        best_combo = None
+        best_combo_weight = 0
+        for i in range(len(remaining_items)):
+            for j in range(i, len(remaining_items)):
+                for k in range(j, len(remaining_items)):
+                    if i == j == k:
+                        combo = [remaining_items[i]]
+                    elif i == j or j == k:
+                        combo = [remaining_items[i], remaining_items[k]]
+                    else:
+                        combo = [remaining_items[i], remaining_items[j], remaining_items[k]]
+                    combo_weight = sum(combo)
+                    if combo_weight <= space_left and combo_weight > best_combo_weight:
+                        best_combo = combo
+                        best_combo_weight = combo_weight
+        return best_combo
+
+    while items:
+        if not items: break
+        item = items.pop(0)
+        if not current_bin or sum(current_bin) + item <= bin_capacity:
+            current_bin.append(item)
+            if is_third_full(current_bin, bin_capacity) or not items:
+                space_left = bin_capacity - sum(current_bin)
+                remaining_items = items.copy()
+                best_combo = find_best_combo(remaining_items, space_left)
+                if best_combo:
+                    for combo_item in best_combo:
+                        current_bin.append(combo_item)
+                        items.remove(combo_item)
+                bins.append(current_bin)
+                current_bin = []
+
+    if current_bin:
+        bins.append(current_bin)
+
+    return bins
+
+
+
+
+def ADJD(items, bin_capacity): 
+
+    def find_best_combo(remaining_items, space_left):
+        best_combo = None
+        best_combo_weight = 0
+        for i in range(len(remaining_items)):
+            for j in range(i, len(remaining_items)):
+                combo = [remaining_items[i]] if i == j else [remaining_items[i], remaining_items[j]]
+                combo_weight = sum(combo)
+                if combo_weight <= space_left and combo_weight > best_combo_weight:
+                    best_combo = combo
+                    best_combo_weight = combo_weight
+        return best_combo
+
+    bins = []   
+    while items:
+        current_bin = []
+        while items:
+            if not items: break
+            avg_size_remaining_items = sum(items) / len(items)
+            space_left = bin_capacity - sum(current_bin)
+            
+            if space_left > 3 * avg_size_remaining_items:
+                current_bin.append(items.pop(0))
+            else:
+                break  
+
+        space_left = bin_capacity - sum(current_bin)
+        best_combo = find_best_combo(items, space_left)
+        if best_combo:
+            for combo_item in best_combo:
+                current_bin.append(combo_item)
+                items.remove(combo_item)
+
+        bins.append(current_bin)
+
+    return bins
+
+
+def calculate_features(items, bin_capacity):
+    total_items = len(items)
+    total_volume = sum(items)
+    max_item_size = max(items) if items else 0
+    min_item_size = min(items) if items else 0
+    avg_item_size = total_volume / total_items if total_items else 0
+    volume_relative_to_capacity = total_volume / bin_capacity if bin_capacity else 0
+    variance_in_size = sum((x - avg_item_size) ** 2 for x in items) / total_items if total_items else 0
+    std_deviation_in_size = variance_in_size ** 0.5
+    max_item_relative_to_capacity = max_item_size / bin_capacity if bin_capacity else 0
+    min_item_relative_to_capacity = min_item_size / bin_capacity if bin_capacity else 0
+    
+    return variance_in_size, std_deviation_in_size, total_items, volume_relative_to_capacity, max_item_relative_to_capacity, min_item_relative_to_capacity, avg_item_size
+
+
+def load_classifier(model_path='heuristic_classifier.pkl'):
+    return joblib.load(model_path)
+
+def heuristic_accuracy(classifier, features, heuristics_results):
+    prediction = classifier.predict([features])[0]
+    optimal_heuristic = min(heuristics_results, key=heuristics_results.get)
+    is_correct = prediction == optimal_heuristic
+    return is_correct, prediction
+
+def lower_bound(items, bin_capacity):
+    total_volume = sum(items)
+    return (total_volume + bin_capacity - 1) // bin_capacity  
+
+def error_percentage(used_bins, optimal_bins):
+    return ((used_bins - optimal_bins) / optimal_bins) * 100 if optimal_bins else 0
+
+
+
+
+def main():
+    classifier = load_classifier()
+    
+    datasets = {
+        'DS1': generate_items_ds1([100, 120, 150], [50, 100, 200, 500], [(1, 100), (20, 100), (30, 100)]),
+        'DS2': generate_items_ds2(1000, [50, 100, 200, 500], [3, 5, 7, 9]),
+        'DS3': generate_items_ds3(100000, 200, (20000, 30000)),
+        'DST': generate_items_dst([100, 300, 700], [20, 40, 80, 160], [(5, 20), (20, 50), (50, 100)])
+    }
+    
+    results = {}
+    ahs_results = {} 
+
+    for ds_name, ds in datasets.items():
+        results[ds_name] = {'FFD': [], 'DJD': [], 'ADJD': []}
+        ahs_results[ds_name] = {'bins': [], 'time': [], 'error': []}  
+        correct_predictions = 0
+        total_instances = 0
+        
+        for bin_capacity, items in ds:
+            features = calculate_features(items, bin_capacity)
+            optimal_bins = lower_bound(items, bin_capacity)
+            
+            # Measure performance and get the results of each heuristic
+            time_ffd, ffd_bins = time_heuristic(FFD, items.copy(), bin_capacity)
+            time_djd, djd_bins = time_heuristic(DJD, items.copy(), bin_capacity)
+            time_adjd, adjd_bins = time_heuristic(ADJD, items.copy(), bin_capacity)
+            
+            heuristics_results = {'FFD': (len(ffd_bins), time_ffd), 'DJD': (len(djd_bins), time_djd), 'ADJD': (len(adjd_bins), time_adjd)}
+            optimal_heuristic = min(heuristics_results, key=lambda k: heuristics_results[k][0])
+            
+            # Use the classifier to predict the best heuristic
+            predicted_index = classifier.predict([features])[0]
+            predicted_heuristic = list(heuristics_results.keys())[predicted_index]
+            predicted_bins, predicted_time = heuristics_results[predicted_heuristic]
+            
+            # Store results for the AHS
+            ahs_results[ds_name]['bins'].append(predicted_bins)
+            ahs_results[ds_name]['time'].append(predicted_time)
+            ahs_results[ds_name]['error'].append(error_percentage(predicted_bins, optimal_bins))
+            
+            # Check if the prediction was correct
+            is_correct = predicted_heuristic == optimal_heuristic
+            if is_correct:
+                correct_predictions += 1
+            
+            # Store results for each heuristic
+            for heuristic, (bins_count, timing) in heuristics_results.items():
+                err_pct = error_percentage(bins_count, optimal_bins)
+                results[ds_name][heuristic].append((bins_count, timing, err_pct))
+            
+            total_instances += 1  
+        
+        # Calculate accuracy and average results for AHS
+        accuracy = correct_predictions / total_instances
+        avg_bins_ahs = sum(ahs_results[ds_name]['bins']) / len(ahs_results[ds_name]['bins'])
+        avg_time_ahs = sum(ahs_results[ds_name]['time']) / len(ahs_results[ds_name]['time'])
+        avg_error_ahs = sum(ahs_results[ds_name]['error']) / len(ahs_results[ds_name]['error'])
+        
+        # Output results for each heuristic
+        print(f"Dataset: {ds_name}, Classifier Accuracy: {accuracy:.2f}")
+        print(f"AHS: Avg. Bins Used = {avg_bins_ahs:.2f}, Avg. Time = {avg_time_ahs:.3e} seconds, Avg. Error Percentage = {avg_error_ahs:.2f}%")
+        
+        for heuristic, outcomes in results[ds_name].items():
+            avg_bins = sum(bins for bins, _, _ in outcomes) / len(outcomes)
+            avg_time = sum(time for _, time, _ in outcomes) / len(outcomes)
+            avg_error = sum(err for _, _, err in outcomes) / len(outcomes)
+            print(f" - {heuristic}: Avg. Bins Used = {avg_bins:.2f}, Avg. Time = {avg_time:.3e} seconds, Avg. Error Percentage = {avg_error:.2f}%")
+        
+        print()
+
+main()
+
+

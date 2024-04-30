@@ -1,0 +1,30 @@
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import accuracy_score
+import joblib
+
+heuristic_labels = {'FFD': 0, 'DJD': 1, 'ADJD': 2}
+
+def read_data_from_file(file_path):
+    X, y = [], []
+    with open(file_path, 'r') as file:
+        for line in file:
+            features, heuristic = line.strip().split('], ')
+            features = np.array([float(value) for value in features[1:].split(', ')])
+            heuristic = heuristic_labels[heuristic]
+            X.append(features)
+            y.append(heuristic)
+    return np.array(X), np.array(y)
+
+X, y = read_data_from_file('heuristic_performance.txt')  
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+
+clf = DecisionTreeClassifier(random_state=42)
+clf.fit(X_train, y_train)
+predictions = clf.predict(X_test)
+print("Accuracy:", accuracy_score(y_test, predictions))
+joblib.dump(clf, 'heuristic_classifier.pkl')
+
+print("Model saved as heuristic_classifier.pkl")
